@@ -497,6 +497,101 @@ export const leaveGroup = async (groupId: string, userId: string): Promise<void>
   }
 };
 
+export const addMemberByEmail = async (groupId: string, email: string, currentUserId: string): Promise<void> => {
+  // 1. Get Group & Verify Permissions
+  const groups: SchoolGroup[] = JSON.parse(localStorage.getItem(KEY_GROUPS) || '[]');
+  const group = groups.find(g => g.id === groupId);
+  
+  if (!group) throw new Error("Group not found locally");
+  
+  const currentUserRole = group.members.find(m => m.userId === currentUserId)?.role;
+  if (currentUserRole !== UserRole.PRINCIPAL && currentUserRole !== UserRole.SUPERVISOR) {
+      throw new Error("Only Principal or Supervisor can add members.");
+  }
+
+  // 2. Find User by Email (Cloud Priority)
+  let targetUserId: string | null = null;
+  let targetUserData: any = null;
+
+  if (db && isFirestoreAvailable) {
+      try {
+        const q = query(collection(db, 'users'), where('email', '==', email));
+        const querySnapshot = await getDocs(q);
+        if (!querySnapshot.empty) {
+            targetUserId = querySnapshot.docs[0].id;
+            targetUserData = querySnapshot.docs[0].data();
+        }
+      } catch (e) {
+        console.warn("User lookup failed in cloud", e);
+      }
+  } 
+  
+  // Fallback local check (if cloud failed or offline)
+  if (!targetUserId) {
+      const localUsers: User[] = JSON.parse(localStorage.getItem(KEY_USERS) || '[]');
+      const found = localUsers.find(u => u.email === email);
+      if (found) {
+        targetUserId = found.id;
+        targetUserData = found;
+      }
+  }
+
+  if (!targetUserId) {
+      throw new Error("User with this email is not registered in the system.");
+  }
+
+  // 3. Check if already member
+  if (group.members.some(m => m.userId === targetUserId)) {
+      throw new Error("User is already a member of this group.");
+  }
+
+  // 4. Update Local User Cache (Important for UI display)
+  const localUsers: User[] = JSON.parse(localStorage.getItem(KEY_USERS) || '[]');
+  if (!localUsers.find(u => u.id === targetUserId) && targetUserData) {
+      localUsers.push({
+          id: targetUserId,
+          name: targetUserData.name || 'User',
+          email: targetUserData.email,
+          photoURL: targetUserData.photoURL,
+          provider: targetUserData.provider
+      });
+      localStorage.setItem(KEY_USERS, JSON.stringify(localUsers));
+  }
+
+  // 5. Add Member
+  const newMember = { userId: targetUserId, role: UserRole.TEACHER, joinedAt: Date.now() };
+  group.members.push(newMember);
+
+  // 6. Update Local Storage Group
+  const groupIndex = groups.findIndex(g => g.id === groupId);
+  groups[groupIndex] = group;
+  localStorage.setItem(KEY_GROUPS, JSON.stringify(groups));
+
+  // 7. Update Cloud Group
+  if (db && isFirestoreAvailable) {
+      try {
+          const groupRef = doc(db, 'groups', groupId);
+          const groupSnap = await getDoc(groupRef);
+          if (groupSnap.exists()) {
+              const data = groupSnap.data();
+              const members = data.members || [];
+              const memberIds = data.memberIds || [];
+              
+              // Only add if not present in cloud version (concurrent check)
+              if (!members.find((m:any) => m.userId === targetUserId)) {
+                members.push(newMember);
+                if (!memberIds.includes(targetUserId)) {
+                    memberIds.push(targetUserId);
+                }
+                await setDoc(groupRef, { members, memberIds }, { merge: true });
+              }
+          }
+      } catch (e) {
+          handleFirestoreError(e);
+      }
+  }
+};
+
 export const joinGroup = async (groupIdRaw: string, userId: string): Promise<SchoolGroup> => {
   const groupId = groupIdRaw.toUpperCase();
   let groups: SchoolGroup[] = JSON.parse(localStorage.getItem(KEY_GROUPS) || '[]');

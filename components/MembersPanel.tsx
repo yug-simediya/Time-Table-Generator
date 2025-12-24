@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { SchoolGroup, User, UserRole } from '../types';
-import { getGroupMembersDetails, updateGroupMemberRole, leaveGroup } from '../services/dataService';
-import { User as UserIcon, Calendar, Mail, Shield, LogOut } from 'lucide-react';
+import { getGroupMembersDetails, updateGroupMemberRole, leaveGroup, addMemberByEmail } from '../services/dataService';
+import { User as UserIcon, Calendar, Mail, Shield, LogOut, UserPlus, X, Loader2 } from 'lucide-react';
 
 interface Props {
   group: SchoolGroup | null;
@@ -11,13 +11,16 @@ interface Props {
 
 const MembersPanel: React.FC<Props> = ({ group, currentUser, onLeave }) => {
   const [members, setMembers] = useState<any[]>([]);
+  const [showAddMember, setShowAddMember] = useState(false);
+  const [addEmail, setAddEmail] = useState('');
+  const [isAdding, setIsAdding] = useState(false);
 
   useEffect(() => {
     if (group) {
       const details = getGroupMembersDetails(group.id);
       setMembers(details);
     }
-  }, [group, members.length]); // Reload if count changes, role change is local state optimistic
+  }, [group, members.length, showAddMember]); 
 
   const handleRoleChange = async (targetUserId: string, newRole: UserRole) => {
     if (!group || !currentUser) return;
@@ -49,6 +52,24 @@ const MembersPanel: React.FC<Props> = ({ group, currentUser, onLeave }) => {
     }
   };
 
+  const handleAddMember = async () => {
+      if (!group || !currentUser || !addEmail) return;
+      setIsAdding(true);
+      try {
+          await addMemberByEmail(group.id, addEmail.trim(), currentUser.id);
+          alert("Member added successfully!");
+          setAddEmail('');
+          setShowAddMember(false);
+          // Refresh list immediately
+          const details = getGroupMembersDetails(group.id);
+          setMembers(details);
+      } catch (e: any) {
+          alert(e.message);
+      } finally {
+          setIsAdding(false);
+      }
+  };
+
   if (!group) {
     return (
       <div className="glass-panel p-12 text-center flex flex-col items-center justify-center h-[50vh]">
@@ -64,6 +85,8 @@ const MembersPanel: React.FC<Props> = ({ group, currentUser, onLeave }) => {
   }
 
   const isCurrentUserAdmin = group.adminId === currentUser?.id;
+  const currentUserRole = members.find(m => m.id === currentUser?.id)?.role;
+  const canAddMembers = currentUserRole === UserRole.PRINCIPAL || currentUserRole === UserRole.SUPERVISOR;
 
   return (
     <div className="animate-fade-in space-y-6">
@@ -79,11 +102,20 @@ const MembersPanel: React.FC<Props> = ({ group, currentUser, onLeave }) => {
              </p>
            </div>
            
-           <div className="flex items-center gap-3 self-end md:self-auto">
+           <div className="flex flex-wrap items-center gap-3 self-end md:self-auto">
              <div className="bg-[#18181b] px-4 py-2 rounded-full border border-[#27272a] text-xs font-mono text-brand-lime">
                ID: {group.id}
              </div>
              
+             {canAddMembers && (
+                <button 
+                  onClick={() => setShowAddMember(true)}
+                  className="flex items-center gap-2 px-4 py-2 bg-brand-lime text-black font-bold rounded-full text-xs hover:bg-brand-limeDark transition-all shadow-glow"
+                >
+                  <UserPlus size={14} /> Add Member
+                </button>
+             )}
+
              {currentUser && (
                <button 
                  onClick={handleLeaveGroup}
@@ -138,8 +170,8 @@ const MembersPanel: React.FC<Props> = ({ group, currentUser, onLeave }) => {
                 </h3>
                 
                 <div className="mt-4 space-y-2">
-                  <div className="flex items-center gap-2 text-sm text-brand-muted">
-                    <Mail size={14} /> {member.email}
+                  <div className="flex items-center gap-2 text-sm text-brand-muted break-all">
+                    <Mail size={14} className="shrink-0" /> {member.email}
                   </div>
                   <div className="flex items-center gap-2 text-sm text-brand-muted">
                     <Calendar size={14} /> Joined {new Date(member.joinedAt).toLocaleDateString()}
@@ -149,6 +181,48 @@ const MembersPanel: React.FC<Props> = ({ group, currentUser, onLeave }) => {
            ))}
          </div>
        </div>
+
+       {/* Add Member Modal */}
+       {showAddMember && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
+           <div className="glass-panel w-full max-w-sm p-6 animate-fade-in relative">
+              <button onClick={() => setShowAddMember(false)} className="absolute top-4 right-4 text-brand-muted hover:text-white"><X size={24} /></button>
+              <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+                 <UserPlus size={20} className="text-brand-lime" /> Add Member
+              </h3>
+              
+              <p className="text-sm text-brand-muted mb-4">
+                 Add a registered user to this group. They will gain immediate access.
+              </p>
+
+              <div className="space-y-4">
+                 <div>
+                    <label className="block text-xs font-bold text-brand-muted mb-1 uppercase">User Email</label>
+                    <input 
+                      type="email" 
+                      value={addEmail} 
+                      onChange={(e) => setAddEmail(e.target.value)}
+                      placeholder="teacher@school.edu"
+                      className="w-full bg-[#0a0a0a] border border-[#27272a] rounded-xl px-4 py-3 text-white focus:border-brand-lime outline-none"
+                    />
+                 </div>
+              </div>
+
+              <div className="flex gap-3 mt-8">
+                 <button onClick={() => setShowAddMember(false)} className="flex-1 py-3 bg-[#18181b] text-white rounded-xl border border-[#27272a] hover:bg-[#27272a]">
+                   Cancel
+                 </button>
+                 <button 
+                   onClick={handleAddMember} 
+                   disabled={isAdding}
+                   className="flex-1 py-3 bg-brand-lime text-black font-bold rounded-xl hover:bg-brand-limeDark shadow-glow flex items-center justify-center gap-2"
+                 >
+                   {isAdding ? <Loader2 className="animate-spin" size={16} /> : <><UserPlus size={16} /> Add User</>}
+                 </button>
+              </div>
+           </div>
+        </div>
+      )}
     </div>
   );
 };
