@@ -497,7 +497,8 @@ export const leaveGroup = async (groupId: string, userId: string): Promise<void>
   }
 };
 
-export const joinGroup = async (groupId: string, userId: string): Promise<SchoolGroup> => {
+export const joinGroup = async (groupIdRaw: string, userId: string): Promise<SchoolGroup> => {
+  const groupId = groupIdRaw.toUpperCase();
   let groups: SchoolGroup[] = JSON.parse(localStorage.getItem(KEY_GROUPS) || '[]');
   let group = groups.find(g => g.id === groupId);
 
@@ -515,11 +516,12 @@ export const joinGroup = async (groupId: string, userId: string): Promise<School
                 if (snap.exists()) {
                     const cloudData = snap.data();
                     const members = cloudData.members || [];
-                    const memberIds = cloudData.memberIds || [];
+                    const currentMemberIds = cloudData.memberIds || [];
                     
                     if (!members.find((m: any) => m.userId === userId)) {
                         members.push({ userId, role: UserRole.TEACHER, joinedAt: Date.now() });
-                        memberIds.push(userId);
+                        // Ensure unique set of member IDs
+                        const memberIds = Array.from(new Set([...currentMemberIds, userId]));
                         await setDoc(ref, { members, memberIds }, { merge: true });
                     }
                 }
@@ -545,13 +547,17 @@ export const joinGroup = async (groupId: string, userId: string): Promise<School
                 group.members.push({ userId, role: UserRole.TEACHER, joinedAt: Date.now() });
                 
                 // Update Cloud with new member
-                const memberIds = (snap.data().memberIds || []).concat(userId);
+                const currentMemberIds = snap.data().memberIds || [];
+                const memberIds = Array.from(new Set([...currentMemberIds, userId]));
                 await setDoc(ref, { members: group.members, memberIds }, { merge: true });
             }
             
             // Save to Local Storage
-            groups.push(group);
-            localStorage.setItem(KEY_GROUPS, JSON.stringify(groups));
+            // Only add if not already in local list (double check)
+            if (!groups.some(g => g.id === group!.id)) {
+               groups.push(group);
+               localStorage.setItem(KEY_GROUPS, JSON.stringify(groups));
+            }
             return group;
         }
     } catch (e) {

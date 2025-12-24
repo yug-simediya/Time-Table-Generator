@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { User, SchoolGroup, UserRole } from '../types';
 import { createGroup, joinGroup, getUserGroups, updateUserPassword, syncUserGroups, deleteGroup } from '../services/dataService';
@@ -354,7 +353,7 @@ const Dashboard: React.FC<Props> = ({ user, onSelectContext, onLogout }) => {
                placeholder="XYZ123" 
                className="w-full bg-[#0a0a0a] border border-[#27272a] rounded-xl px-4 py-4 text-white mb-2 uppercase tracking-[0.5em] text-center font-mono text-xl focus:border-brand-lime outline-none transition-colors"
                value={joinId}
-               onChange={(e) => setJoinId(e.target.value)}
+               onChange={(e) => setJoinId(e.target.value.toUpperCase())}
                maxLength={6}
                disabled={isLoadingGroups}
              />
