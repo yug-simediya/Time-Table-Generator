@@ -1,4 +1,3 @@
-
 import { INITIAL_STATE } from '../constants';
 import { AppState, SchoolGroup, User, UserRole } from '../types';
 import { auth, db, googleProvider } from './firebaseConfig';
@@ -408,7 +407,8 @@ export const deleteGroup = async (groupId: string, userId: string): Promise<void
   const group = groups.find(g => g.id === groupId);
   
   if (!group) {
-    throw new Error("Group not found");
+    // If not found, just return (maybe already deleted)
+    return;
   }
   
   if (group.adminId !== userId) {
@@ -439,6 +439,61 @@ export const deleteGroup = async (groupId: string, userId: string): Promise<void
       // We don't block the UI if cloud delete fails, as local is already updated
       console.error("Failed to delete group from cloud", e);
     }
+  }
+};
+
+export const leaveGroup = async (groupId: string, userId: string): Promise<void> => {
+  // 1. Get Group
+  const groups: SchoolGroup[] = JSON.parse(localStorage.getItem(KEY_GROUPS) || '[]');
+  let group = groups.find(g => g.id === groupId);
+  if (!group) throw new Error("Group not found");
+
+  // 2. Remove User
+  const remainingMembers = group.members.filter(m => m.userId !== userId);
+  
+  // 3. Handle Empty Group (Delete)
+  if (remainingMembers.length === 0) {
+      await deleteGroup(groupId, userId);
+      return;
+  }
+
+  // 4. Handle Admin Departure (Succession)
+  if (group.adminId === userId) {
+      // Find successor: Prioritize Supervisor, then oldest member
+      let successor = remainingMembers.find(m => m.role === UserRole.SUPERVISOR);
+      
+      if (!successor) {
+          // If no supervisor, pick the first member (usually the oldest joined besides admin)
+          successor = remainingMembers[0];
+      }
+
+      // Promote
+      successor.role = UserRole.PRINCIPAL;
+      group.adminId = successor.userId;
+  }
+  
+  // Apply member update
+  group.members = remainingMembers;
+  
+  // 5. Save Changes (Local)
+  const groupIndex = groups.findIndex(g => g.id === groupId);
+  groups[groupIndex] = group;
+  localStorage.setItem(KEY_GROUPS, JSON.stringify(groups));
+
+  // 6. Save Changes (Cloud)
+  if (db && isFirestoreAvailable) {
+      try {
+          const ref = doc(db, 'groups', groupId);
+          // Sync memberIds for querying
+          const memberIds = group.members.map(m => m.userId);
+          await setDoc(ref, { 
+              members: group.members, 
+              adminId: group.adminId, 
+              memberIds 
+          }, { merge: true });
+      } catch (e) {
+          handleFirestoreError(e);
+      }
   }
 };
 
@@ -532,15 +587,12 @@ export const syncUserGroups = async (userId: string) => {
             } else {
                 // Check if cloud version has more members/updates
                 // Simple check on member count or just overwrite for now
-                if (localGroups[idx].members.length !== cloudGroup.members.length) {
+                if (localGroups[idx].members.length !== cloudGroup.members.length || localGroups[idx].adminId !== cloudGroup.adminId) {
                     localGroups[idx] = cloudGroup;
                     updated = true;
                 }
             }
         });
-        
-        // Remove groups locally that are no longer in cloud (optional, depends on if we want offline-first persistence)
-        // For now, let's keep local groups if they exist to avoid accidental data loss during sync issues
         
         if (updated) {
             localStorage.setItem(KEY_GROUPS, JSON.stringify(localGroups));
@@ -550,6 +602,32 @@ export const syncUserGroups = async (userId: string) => {
         console.warn("Sync groups failed", e);
         // Fallback to local
     }
+};
+
+export const updateGroupMemberRole = async (groupId: string, targetUserId: string, newRole: UserRole, currentUserId: string): Promise<SchoolGroup> => {
+  const groups: SchoolGroup[] = JSON.parse(localStorage.getItem(KEY_GROUPS) || '[]');
+  const group = groups.find(g => g.id === groupId);
+
+  if (!group) throw new Error("Group not found");
+  if (group.adminId !== currentUserId) throw new Error("Only admin can change roles");
+
+  // Local Update
+  const member = group.members.find(m => m.userId === targetUserId);
+  if (member) {
+    member.role = newRole;
+    localStorage.setItem(KEY_GROUPS, JSON.stringify(groups));
+
+    // Cloud Update
+    if (db && isFirestoreAvailable) {
+      try {
+        const ref = doc(db, 'groups', groupId);
+        await setDoc(ref, { members: group.members }, { merge: true });
+      } catch (e) {
+        handleFirestoreError(e);
+      }
+    }
+  }
+  return group;
 };
 
 export const getUserGroups = (userId: string): SchoolGroup[] => {

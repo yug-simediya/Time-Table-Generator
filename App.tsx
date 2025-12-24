@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { AppState, User, SchoolGroup, UserRole } from './types';
 import { INITIAL_STATE } from './constants';
@@ -10,6 +9,7 @@ import DataEntryPanel from './components/DataEntryPanel';
 import FacultyPanel from './components/FacultyPanel';
 import ScheduleView from './components/ScheduleView';
 import MembersPanel from './components/MembersPanel';
+import SchediniChat from './components/SchediniChat';
 import Auth from './components/Auth';
 import Dashboard from './components/Dashboard';
 import { Bell, Lock, Cloud, Loader2, CheckCircle2, CloudOff } from 'lucide-react';
@@ -117,6 +117,13 @@ const App: React.FC = () => {
     setStep(0); // Reset step
   };
 
+  const handleGroupLeave = () => {
+      // Return to dashboard and clear current group context
+      setActiveContext('dashboard');
+      setCurrentGroup(null);
+      setContextId('personal');
+  };
+
   const handleStateChange = (updates: Partial<AppState>) => {
     // Permission Check
     if (userRole === UserRole.TEACHER && contextId !== 'personal') {
@@ -146,14 +153,15 @@ const App: React.FC = () => {
         case 2: return <DataEntryPanel state={appState} onChange={handleStateChange} />;
         case 3: return <FacultyPanel state={appState} onChange={handleStateChange} />;
         case 4: return <ScheduleView state={appState} onChange={handleStateChange} />;
-        case 5: return <MembersPanel group={currentGroup} currentUser={currentUser} />;
+        case 5: return <MembersPanel group={currentGroup} currentUser={currentUser} onLeave={handleGroupLeave} />;
+        case 6: return <SchediniChat />;
         default: return <SetupPanel state={appState} onChange={handleStateChange} />;
       }
     };
 
     return (
       <div className="relative">
-        {isReadOnly && step !== 4 && step !== 5 && (
+        {isReadOnly && step !== 4 && step !== 5 && step !== 6 && (
           <div className="absolute inset-0 z-50 bg-black/60 backdrop-blur-[2px] flex flex-col items-center justify-center rounded-3xl border border-red-900/50">
              <Lock size={48} className="text-red-500 mb-4" />
              <h3 className="text-xl font-bold text-white">View Only Access</h3>
@@ -204,6 +212,7 @@ const App: React.FC = () => {
               {step === 3 && 'Teacher Management'}
               {step === 4 && 'Schedule Overview'}
               {step === 5 && 'Member Management'}
+              {step === 6 && 'AI Assistant'}
             </h1>
             <div className="flex items-center gap-2 mt-1">
                {currentGroup && <p className="text-xs text-brand-lime font-mono">GROUP: {currentGroup.name}</p>}
